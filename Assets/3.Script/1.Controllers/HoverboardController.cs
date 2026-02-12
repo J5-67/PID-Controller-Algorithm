@@ -2,30 +2,42 @@ using UnityEngine;
 
 public class HoverboardController : MonoBehaviour
 {
+    [Header("Hover Settings")]
     [SerializeField] private float hoverHeight = 1.5f;
-    [SerializeField] private float hoverForce = 1500f;
+    [SerializeField] private float hoverForce = 4f; 
     
-    [SerializeField, Range(0, 10)] private float kp = 5f;
+    [Header("PID Tuning")]
+    [SerializeField, Range(0, 50)] private float kp = 2f; 
     [SerializeField, Range(0, 10)] private float ki = 0f;
-    [SerializeField, Range(0, 10)] private float kd = 2f;
+    [SerializeField, Range(0, 100)] private float kd = 10f; 
 
+    [Header("Movement")]
     [SerializeField] private float moveSpeed = 10f;
     [SerializeField] private float turnSpeed = 2f;
 
-    [SerializeField] private Transform[] thrusters;
+    [Header("Stability")]
+    [SerializeField] private Vector3 centerOfMassOffset = new Vector3(0, -1.0f, 0); 
+    [SerializeField] private float tiltAngleLimit = 30f; 
+    [SerializeField] private float airResistance = 2f; 
 
+    [SerializeField] private Transform[] thrusters;
     [SerializeField] private LayerMask groundLayer;
 
     private Rigidbody _rb;
     private PID[] _pidControllers;
+    private float _moveInput;
+    private float _turnInput;
+    private Vector3 _averageGroundNormal = Vector3.up; // 💡 땅의 기울기 저장용
 
     private void Awake()
     {
         if (!TryGetComponent(out _rb))
         {
-            Debug.LogError("HoverboardController: Rigidbody not found!");
             return;
         }
+
+        _rb.centerOfMass = centerOfMassOffset;
+        _rb.angularDamping = 5f; 
 
         _pidControllers = new PID[thrusters.Length];
         for (int i = 0; i < thrusters.Length; i++)
@@ -34,73 +46,112 @@ public class HoverboardController : MonoBehaviour
         }
     }
 
+    private void Update()
+    {
+        _moveInput = Input.GetAxis("Vertical");
+        _turnInput = Input.GetAxis("Horizontal");
+    }
+
     private void FixedUpdate()
     {
         HandleHover();
         HandleMovement();
+        Stabilize(); 
+        ApplyAirResistance(); 
     }
 
     private void HandleHover()
     {
+        // 💡 지면 법선(Normal) 초기화 (아무것도 안 닿으면 그냥 위쪽이 기준)
+        Vector3 normalSum = Vector3.zero;
+        int hitCount = 0;
+
         for (int i = 0; i < thrusters.Length; i++)
         {
             Transform thruster = thrusters[i];
             
-            // Raycast now only hits the specified groundLayer
             if (Physics.Raycast(thruster.position, -transform.up, out RaycastHit hit, hoverHeight * 1.5f, groundLayer))
             {
                 float currentHeight = hit.distance;
                 float error = hoverHeight - currentHeight;
 
                 float output = _pidControllers[i].GetOutput(error, Time.fixedDeltaTime, kp, ki, kd);
-                
-                // Thrusters can only push UP, never pull down! (Prevent vacuum effect)
-                // Also, limit the max force if needed, but for now just prevent negative.
                 float clampedOutput = Mathf.Max(0f, output);
 
-                // Use global Up vector to ensure force is always applied upwards
                 Vector3 force = Vector3.up * (hoverForce * clampedOutput);
-                
-                // Use ForceMode.Acceleration to ignore mass
                 _rb.AddForceAtPosition(force, thruster.position, ForceMode.Acceleration);
 
-                // Debug log (Comment out if too spammy)
-                // if (i == 0) Debug.Log($"[Thruster 0] Error: {error:F2}, PID Out: {output:F2}, Clamped Force: {force.y:F2}");
+                // 💡 닿은 곳의 기울기(Normal)를 누적해서 합침
+                normalSum += hit.normal;
+                hitCount++;
             }
             else
             {
                 _pidControllers[i].Reset();
             }
         }
+
+        // 💡 평균 기울기 계산 (바닥에 닿아있으면 갱신, 공중에선 위쪽(Vector3.up) 유지)
+        if (hitCount > 0)
+        {
+            _averageGroundNormal = (normalSum / hitCount).normalized;
+        }
+        else
+        {
+            _averageGroundNormal = Vector3.up;
+        }
     }
 
     private void HandleMovement()
     {
-        float move = Input.GetAxis("Vertical");
-        float turn = Input.GetAxis("Horizontal");
+        // 💡 오빠 말대로 무조건 수평으로 하면 안 됨!
+        // "바닥 기울기에 맞춰서" 앞으로 가야 부드럽게 올라감 (ProjectOnPlane)
+        
+        // 1. 내 앞 방향(transform.forward)을 바닥 기울기(_averageGroundNormal) 평면에 투영!
+        Vector3 slopeMoveDirection = Vector3.ProjectOnPlane(transform.forward, _averageGroundNormal).normalized;
 
-        _rb.AddForce(transform.forward * move * moveSpeed, ForceMode.Acceleration);
-        _rb.AddTorque(transform.up * turn * turnSpeed, ForceMode.Acceleration);
+        // 2. 공중(Vector3.up일 때)에서는 너무 위로 솟지 않게 Y축 힘을 좀 뺌 (선택사항)
+        // 하지만 ProjectOnPlane 덕분에 평지에서는 수평, 경사에서는 경사로 방향이 됨! 
+        
+        _rb.AddForce(slopeMoveDirection * _moveInput * moveSpeed, ForceMode.Acceleration);
+        _rb.AddTorque(transform.up * _turnInput * turnSpeed, ForceMode.Acceleration);
+    }
+    
+    private void Stabilize()
+    {
+        float angle = Vector3.Angle(transform.up, Vector3.up);
+        
+        if (angle > tiltAngleLimit)
+        {
+            Vector3 axis = Vector3.Cross(transform.up, Vector3.up);
+            _rb.AddTorque(axis * (angle * 0.5f), ForceMode.Acceleration); 
+        }
+    }
+    
+    private void ApplyAirResistance()
+    {
+        if (!Physics.Raycast(transform.position, Vector3.down, hoverHeight * 2f, groundLayer))
+        {
+             _rb.AddForce(Vector3.down * 10f, ForceMode.Acceleration);
+        }
     }
 
     private void OnDrawGizmos()
     {
         if (thrusters == null) return;
+        
+        Gizmos.color = Color.blue;
+        Gizmos.DrawSphere(transform.TransformPoint(centerOfMassOffset), 0.2f);
+        
+        // 💡 디버깅용: 이동 방향 벡터 그리기 (노란색)
+        Gizmos.color = Color.yellow;
+        Vector3 slopeMoveDirection = Vector3.ProjectOnPlane(transform.forward, _averageGroundNormal).normalized;
+        Gizmos.DrawLine(transform.position, transform.position + slopeMoveDirection * 3f);
 
         foreach (Transform thruster in thrusters)
         {
-            if (thruster == null) continue;
-            
             Gizmos.color = Color.red;
-            Vector3 direction = -transform.up * hoverHeight * 1.5f;
-            Gizmos.DrawRay(thruster.position, direction);
-
-            if (Physics.Raycast(thruster.position, -transform.up, out RaycastHit hit, hoverHeight * 1.5f, groundLayer))
-            {
-                Gizmos.color = Color.green;
-                Gizmos.DrawSphere(hit.point, 0.1f);
-                Gizmos.DrawLine(thruster.position, hit.point);
-            }
+            Gizmos.DrawRay(thruster.position, -transform.up * hoverHeight * 1.5f);
         }
     }
 }
