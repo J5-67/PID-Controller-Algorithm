@@ -27,7 +27,7 @@ public class HoverboardController : MonoBehaviour
     private PID[] _pidControllers;
     private float _moveInput;
     private float _turnInput;
-    private Vector3 _averageGroundNormal = Vector3.up; // 💡 땅의 기울기 저장용
+    private Vector3 _averageGroundNormal = Vector3.up;
 
     private void Awake()
     {
@@ -62,7 +62,6 @@ public class HoverboardController : MonoBehaviour
 
     private void HandleHover()
     {
-        // 💡 지면 법선(Normal) 초기화 (아무것도 안 닿으면 그냥 위쪽이 기준)
         Vector3 normalSum = Vector3.zero;
         int hitCount = 0;
 
@@ -81,7 +80,6 @@ public class HoverboardController : MonoBehaviour
                 Vector3 force = Vector3.up * (hoverForce * clampedOutput);
                 _rb.AddForceAtPosition(force, thruster.position, ForceMode.Acceleration);
 
-                // 💡 닿은 곳의 기울기(Normal)를 누적해서 합침
                 normalSum += hit.normal;
                 hitCount++;
             }
@@ -91,7 +89,6 @@ public class HoverboardController : MonoBehaviour
             }
         }
 
-        // 💡 평균 기울기 계산 (바닥에 닿아있으면 갱신, 공중에선 위쪽(Vector3.up) 유지)
         if (hitCount > 0)
         {
             _averageGroundNormal = (normalSum / hitCount).normalized;
@@ -104,15 +101,8 @@ public class HoverboardController : MonoBehaviour
 
     private void HandleMovement()
     {
-        // 💡 오빠 말대로 무조건 수평으로 하면 안 됨!
-        // "바닥 기울기에 맞춰서" 앞으로 가야 부드럽게 올라감 (ProjectOnPlane)
-        
-        // 1. 내 앞 방향(transform.forward)을 바닥 기울기(_averageGroundNormal) 평면에 투영!
         Vector3 slopeMoveDirection = Vector3.ProjectOnPlane(transform.forward, _averageGroundNormal).normalized;
 
-        // 2. 공중(Vector3.up일 때)에서는 너무 위로 솟지 않게 Y축 힘을 좀 뺌 (선택사항)
-        // 하지만 ProjectOnPlane 덕분에 평지에서는 수평, 경사에서는 경사로 방향이 됨! 
-        
         _rb.AddForce(slopeMoveDirection * _moveInput * moveSpeed, ForceMode.Acceleration);
         _rb.AddTorque(transform.up * _turnInput * turnSpeed, ForceMode.Acceleration);
     }
@@ -143,7 +133,6 @@ public class HoverboardController : MonoBehaviour
         Gizmos.color = Color.blue;
         Gizmos.DrawSphere(transform.TransformPoint(centerOfMassOffset), 0.2f);
         
-        // 💡 디버깅용: 이동 방향 벡터 그리기 (노란색)
         Gizmos.color = Color.yellow;
         Vector3 slopeMoveDirection = Vector3.ProjectOnPlane(transform.forward, _averageGroundNormal).normalized;
         Gizmos.DrawLine(transform.position, transform.position + slopeMoveDirection * 3f);

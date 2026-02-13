@@ -15,6 +15,7 @@ public class MissileController : MonoBehaviour
     private Rigidbody _rb;
     private IObjectPool<MissileController> _pool;
     private float _timer;
+    private bool _isReleased;
 
     private readonly PID _pidX = new PID();
     private readonly PID _pidY = new PID();
@@ -32,6 +33,7 @@ public class MissileController : MonoBehaviour
 
     private void OnEnable()
     {
+        _isReleased = false;
         _timer = 0f;
         _pidX.Reset();
         _pidY.Reset();
@@ -80,7 +82,6 @@ public class MissileController : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
-        Debug.Log($"BOOM! Hit: {other.name}");
         Release();
     }
 
@@ -89,6 +90,9 @@ public class MissileController : MonoBehaviour
 
     private void Release()
     {
+        if (_isReleased) return;
+        _isReleased = true;
+
         _pool?.Release(this);
     }
 }

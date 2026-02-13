@@ -6,7 +6,17 @@ public class PID
 
     public float GetOutput(float currentError, float deltaTime, float kp, float ki, float kd)
     {
-        _integral += currentError * deltaTime;
+        if (deltaTime <= 0.00001f) return 0f;
+
+        if (ki <= 0f)
+        {
+            _integral = 0f;
+        }
+        else
+        {
+            _integral += currentError * deltaTime;
+        }
+
         float derivative = (currentError - _lastError) / deltaTime;
         _lastError = currentError;
 
